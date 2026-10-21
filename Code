@@ -1,0 +1,416 @@
+Com base na arquitetura padrão de projetos RESTful em Spring Boot (seguindo o mesmo padrão de organização e boas práticas de projetos de referência como o APIPROD), preparei a implementação completa para o **Rastreador de Hábitos** (`Habito`).
+
+Abaixo estão estruturados os códigos de cada camada e arquivo de configuração solicitados.
+
+---
+
+### 1. Configuração (`application.properties`)
+
+Adicione as propriedades de conexão com o MySQL e as configurações do Swagger UI:
+
+```properties
+spring.datasource.url=jdbc:mysql://localhost:3306/habitos_db?useSSL=false&serverTimezone=UTC
+spring.datasource.username=root
+spring.datasource.password=root
+
+spring.jpa.hibernate.ddl-auto=update
+spring.jpa.show-sql=true
+spring.jpa.properties.hibernate.dialect=org.hibernate.dialect.MySQLDialect
+
+# Configurações do OpenAPI / Swagger
+springdoc.api-docs.path=/api-docs
+springdoc.swagger-ui.path=/swagger-ui.html
+
+```
+
+---
+
+### 2. Model / Entity (`model/Habito.java`)
+
+```java
+package com.habitos.api.model;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Entity
+@Table(name = "habitos")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class Habito {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, length = 100)
+    private String nome;
+
+    @Column(length = 50)
+    private String frequencia;
+
+    @Column(nullable = false)
+    private Integer streakDias = 0;
+
+    @Column(length = 300)
+    private String descricao;
+
+    @Column(nullable = false)
+    private Boolean feitoHoje = false;
+}
+
+```
+
+---
+
+### 3. DTO com Bean Validation (`dto/HabitoDTO.java`)
+
+```java
+package com.habitos.api.dto;
+
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class HabitoDTO {
+
+    private Long id;
+
+    @NotBlank(message = "O nome é obrigatório")
+    @Size(max = 100, message = "O nome deve ter no máximo 100 caracteres")
+    private String nome;
+
+    @Size(max = 50, message = "A frequência deve ter no máximo 50 caracteres")
+    private String frequencia;
+
+    @Min(value = 0, message = "O streak de dias não pode ser negativo")
+    private Integer streakDias = 0;
+
+    @Size(max = 300, message = "A descrição deve ter no máximo 300 caracteres")
+    private String descricao;
+
+    private Boolean feitoHoje = false;
+}
+
+```
+
+---
+
+### 4. Mapper (`mapper/HabitoMapper.java`)
+
+```java
+package com.habitos.api.mapper;
+
+import com.habitos.api.dto.HabitoDTO;
+import com.habitos.api.model.Habito;
+import org.springframework.stereotype.Component;
+
+@Component
+public class HabitoMapper {
+
+    public Habito toEntity(HabitoDTO dto) {
+        if (dto == null) return null;
+        Habito habito = new Habito();
+        habito.setId(dto.getId());
+        habito.setNome(dto.getNome());
+        habito.setFrequencia(dto.getFrequencia());
+        habito.setStreakDias(dto.getStreakDias() != null ? dto.getStreakDias() : 0);
+        habito.setDescricao(dto.getDescricao());
+        habito.setFeitoHoje(dto.getFeitoHoje() != null ? dto.getFeitoHoje() : false);
+        return habito;
+    }
+
+    public HabitoDTO toDTO(Habito entity) {
+        if (entity == null) return null;
+        HabitoDTO dto = new HabitoDTO();
+        dto.setId(entity.getId());
+        dto.setNome(entity.getNome());
+        dto.setFrequencia(entity.getFrequencia());
+        dto.setStreakDias(entity.getStreakDias());
+        dto.setDescricao(entity.getDescricao());
+        dto.setFeitoHoje(entity.getFeitoHoje());
+        return dto;
+    }
+}
+
+```
+
+---
+
+### 5. Repository (`repository/HabitoRepository.java`)
+
+```java
+package com.habitos.api.repository;
+
+import com.habitos.api.model.Habito;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+@Repository
+public interface HabitoRepository extends JpaRepository<Habito, Long> {
+}
+
+```
+
+---
+
+### 6. Service (`service/HabitoService.java`)
+
+```java
+package com.habitos.api.service;
+
+import com.habitos.api.dto.HabitoDTO;
+import com.habitos.api.mapper.HabitoMapper;
+import com.habitos.api.model.Habito;
+import com.habitos.api.repository.HabitoRepository;
+import jakarta.persistence.EntityNotFoundException;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+public class HabitoService {
+
+    @Autowired
+    private HabitoRepository repository;
+
+    @Autowired
+    private HabitoMapper mapper;
+
+    public List<HabitoDTO> listarTodos() {
+        return repository.findAll().stream()
+                .map(mapper::toDTO)
+                .collect(Collectors.toList());
+    }
+
+    public HabitoDTO buscarPorId(Long id) {
+        Habito habito = repository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Hábito não encontrado com o ID: " + id));
+        return mapper.toDTO(habito);
+    }
+
+    public HabitoDTO criar(HabitoDTO dto) {
+        Habito habito = mapper.toEntity(dto);
+        if (habito.getStreakDias() == null) {
+            habito.setStreakDias(0);
+        }
+        if (habito.getFeitoHoje() == null) {
+            habito.setFeitoHoje(false);
+        }
+        Habito salvo = repository.save(habito);
+        return mapper.toDTO(salvo);
+    }
+
+    public HabitoDTO atualizar(Long id, HabitoDTO dto) {
+        Habito existente = repository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Hábito não encontrado com o ID: " + id));
+
+        existente.setNome(dto.getNome());
+        existente.setFrequencia(dto.getFrequencia());
+        if (dto.getStreakDias() != null) {
+            existente.setStreakDias(dto.getStreakDias());
+        }
+        existente.setDescricao(dto.getDescricao());
+        if (dto.getFeitoHoje() != null) {
+            existente.setFeitoHoje(dto.getFeitoHoje());
+        }
+
+        Habito atualizado = repository.save(existente);
+        return mapper.toDTO(atualizado);
+    }
+
+    public void remover(Long id) {
+        if (!repository.existsById(id)) {
+            throw new EntityNotFoundException("Hábito não encontrado com o ID: " + id);
+        }
+        repository.deleteById(id);
+    }
+
+    public HabitoDTO concluirHoje(Long id) {
+        Habito habito = repository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Hábito não encontrado com o ID: " + id));
+
+        habito.setFeitoHoje(true);
+        habito.setStreakDias(habito.getStreakDias() + 1);
+
+        Habito atualizado = repository.save(habito);
+        return mapper.toDTO(atualizado);
+    }
+}
+
+```
+
+---
+
+### 7. Controller (`controller/HabitoController.java`)
+
+```java
+package com.habitos.api.controller;
+
+import com.habitos.api.dto.HabitoDTO;
+import com.habitos.api.service.HabitoService;
+import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+@RestController
+@RequestMapping("/api/habitos")
+public class HabitoController {
+
+    @Autowired
+    private HabitoService service;
+
+    @GetMapping
+    public ResponseEntity<List<HabitoDTO>> listarTodos() {
+        return ResponseEntity.ok(service.listarTodos());
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<HabitoDTO> buscarPorId(@PathVariable Long id) {
+        return ResponseEntity.ok(service.buscarPorId(id));
+    }
+
+    @PostMapping
+    public ResponseEntity<HabitoDTO> criar(@RequestBody @Valid HabitoDTO dto) {
+        HabitoDTO novo = service.criar(dto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(novo);
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<HabitoDTO> atualizar(@PathVariable Long id, @RequestBody @Valid HabitoDTO dto) {
+        HabitoDTO atualizado = service.atualizar(id, dto);
+        return ResponseEntity.ok(atualizado);
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> remover(@PathVariable Long id) {
+        service.remover(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @PatchMapping("/{id}/concluir-hoje")
+    public ResponseEntity<HabitoDTO> concluirHoje(@PathVariable Long id) {
+        HabitoDTO concluido = service.concluirHoje(id);
+        return ResponseEntity.ok(concluido);
+    }
+}
+
+```
+
+---
+
+### Verificação e Testes
+
+Após subir a aplicação no Spring Boot, você poderá acessar:
+
+* **Swagger UI:** `http://localhost:8080/swagger-ui.html`
+* **OpenAPI Docs:** `
+
+PUT /api/habitos/{id} — Atualiza um hábito existente.
+
+DELETE /api/habitos/{id} — Remove um hábito.
+
+PATCH /api/habitos/{id}/concluir-hoje — Executa a ação especial de concluir o hábito do dia e atualizar o streak.
+
+
+
+
+
+
+
+Com certeza! Vou explicar detalhadamente cada camada e arquivo que compõem esta API RESTful de **Rastreador de Hábitos** em Spring Boot.
+
+A arquitetura utilizada segue o padrão em camadas, separando responsabilidades para Manter o código limpo, testável e fácil de manter.
+
+---
+
+### 1. Configuração (`application.properties`)
+
+Este arquivo centraliza as configurações da aplicação.
+
+* **Conexão com o Banco de Dados:** Define a URL do MySQL (`habitos_db`), usuário (`root`) e senha.
+* **JPA / Hibernate:** A propriedade `spring.jpa.hibernate.ddl-auto=update` faz com que o Hibernate crie ou atualize automaticamente as tabelas do banco com base nas suas classes `@Entity`. O `show-sql=true` exibe no console as queries SQL executadas.
+* **Swagger / OpenAPI:** Configura as rotas para acessar a documentação interativa da API (`/swagger-ui.html` e `/api-docs`).
+
+---
+
+### 2. Entidade / Model (`model/Habito.java`)
+
+A classe `Habito` representa a tabela `habitos` no banco de dados relacional.
+
+* **`@Entity` e `@Table`:** Indicam ao Spring Data JPA que esta classe é uma entidade gerenciada e mapeada para a tabela correspondente.
+* **`@Id` e `@GeneratedValue`:** Definem o campo `id` como chave primária com autoincremento (`IDENTITY`).
+* **`@Column`:** Configura restrições de banco de dados (ex: `nullable = false`, limites de tamanho `length`).
+* **Lombok (`@Data`, `@NoArgsConstructor`, `@AllArgsConstructor`):** Gera automaticamente os métodos `getters`, `setters`, `toString`, `equals`, `hashCode` e os construtores, evitando código repetitivo (boilerplate).
+
+---
+
+### 3. DTO com Bean Validation (`dto/HabitoDTO.java`)
+
+O **DTO (Data Transfer Object)** é o objeto usado para trafegar dados entre o cliente (frontend/Postman) e a API, isolando a entidade do banco.
+
+* **Bean Validation (`@NotBlank`, `@Size`, `@Min`):** Garantem a validação dos dados logo na entrada da requisição antes mesmo de chegarem na regra de negócio. Se o usuário enviar um nome em branco ou um streak negativo, a API retorna um erro de validação automaticamente.
+
+---
+
+### 4. Mapper (`mapper/HabitoMapper.java`)
+
+O `HabitoMapper` é responsável pela conversão de tipos:
+
+* Transforma um objeto `HabitoDTO` em uma entidade `Habito` (`toEntity`).
+* Transforma uma entidade `Habito` em um `HabitoDTO` (`toDTO`).
+* Isola essa lógica de conversão para que os Controllers e Services não fiquem poluídos com cópias manuais de atributos.
+
+---
+
+### 5. Repository (`repository/HabitoRepository.java`)
+
+É a camada de acesso aos dados.
+
+* Estende `JpaRepository<Habito, Long>`, o que nos fornece prontamente métodos crus de CRUD (`save`, `findAll`, `findById`, `deleteById`, etc.) sem precisarmos escrever nenhuma query SQL manual.
+
+---
+
+### 6. Service (`service/HabitoService.java`)
+
+O **Service** é o coração da aplicação, onde residem as **regras de negócio**.
+
+* **Tratamento de Exceções:** Lança um `EntityNotFoundException` caso o ID buscado ou atualizado não exista no banco.
+* **Validações Padrão:** Garante que valores opcionais como `streakDias` e `feitoHoje` iniciem com valores padrão corretos (`0` e `false`).
+* **Regra Especial (`concluirHoje`):** Localiza o hábito pelo ID, altera o status `feitoHoje` para `true` e incrementa o contador `streakDias` em 1 unidade, salvando a alteração no banco.
+
+---
+
+### 7. Controller (`controller/HabitoController.java`)
+
+O **Controller** expõe os endpoints HTTP para o mundo externo.
+
+* **`@RestController` e `@RequestMapping("/api/habitos")`:** Define a classe como um controlador REST com o prefixo de rota base.
+* **Endpoints Mapeados:**
+* `GET /api/habitos` — Lista todos os hábitos.
+* `GET /api/habitos/{id}` — Busca um hábito específico pelo ID.
+* `POST /api/habitos` — Cria um novo hábito (validando o DTO com `@Valid`).
+* `PUT /api/habitos/{id}` — Atualiza um hábito existente.
+* `DELETE /api/habitos/{id}` — Remove um hábito.
+* `PATCH /api/habitos/{id}/concluir-hoje` — Executa a ação especial de concluir o hábito do dia e atualizar o streak.
+
+
+
+---
+
+Ficou alguma dúvida sobre o funcionamento de alguma dessas camadas ou sobre a integração do projeto?
